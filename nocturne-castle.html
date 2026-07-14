@@ -179,8 +179,9 @@
 
   // only two cheap global lights — NO per-pixel point lights (this is the big perf win)
   // warmer + dimmer for a more languid, moody atmosphere
-  scene.add(new THREE.HemisphereLight(0xffe4a8, 0x241a0c, 0.92));
-  scene.add(new THREE.AmbientLight(0x8a6f3a, 0.42));
+  scene.add(new THREE.HemisphereLight(0xffe4a8, 0x241a0c, 0.85));
+  scene.add(new THREE.AmbientLight(0x8a6f3a, 0.32));
+  var keyLight=new THREE.DirectionalLight(0xfff0d2, 0.7); keyLight.position.set(3,8,2); scene.add(keyLight); // soft key so normal-maps read
 
   // ---------- procedural textures (512px, richer detail) ----------
   var TS=512;
@@ -261,35 +262,54 @@
     var vx=b.x-a.x,vz=b.z-a.z,wx=px-a.x,wz=pz-a.z,t=(vx*wx+vz*wz)/((vx*vx+vz*vz)||1);t=t<0?0:t>1?1:t;
     var d=Math.hypot(px-(a.x+vx*t),pz-(a.z+vz*t));if(d<bd){bd=d;bi=i;}}return bi;}
 
-  // materials: Lambert for lit surfaces, Basic (unlit) for glow
+  // ---------- materials ----------
   function surfMat(map,col){return new THREE.MeshLambertMaterial({map:map||null,color:col!==undefined?col:0xffffff,side:THREE.DoubleSide});}
   function glowMat(col){return new THREE.MeshBasicMaterial({color:col,fog:true});}
   var leatherMat=new THREE.MeshLambertMaterial({color:0x1b1b22});
-  var chromeMat=new THREE.MeshLambertMaterial({color:0xb9bdc4});
+  var chromeMat=new THREE.MeshLambertMaterial({color:0xc2c6cc}); // stays light without an env-map (metal needs HDRI)
   var blackMat=new THREE.MeshLambertMaterial({color:0x151519});
   var frameMat=new THREE.MeshLambertMaterial({color:0x1a150d});
   var skirtMat=new THREE.MeshLambertMaterial({color:0x2a2212,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1});
   var railMat=new THREE.MeshLambertMaterial({color:0x3a2c14,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1});
-  var runnerMat=new THREE.MeshLambertMaterial({color:0x5a4c22}); // worn darker-carpet runner (in palette)
+  var runnerMat=new THREE.MeshLambertMaterial({color:0x5a4c22});
   var cardMat=new THREE.MeshLambertMaterial({color:0x8a6b3a});
+
+  // shared PBR surfaces — procedural maps now; auto-swapped for Poly Haven textures if files exist in assets/
+  wallTex.repeat.set(1,1);carpetTex.repeat.set(1,1);ceilTex.repeat.set(1,1);
+  var wallMat =new THREE.MeshStandardMaterial({map:wallTex,  roughness:0.95,metalness:0,side:THREE.DoubleSide});
+  var floorMat=new THREE.MeshStandardMaterial({map:carpetTex,roughness:0.98,metalness:0,side:THREE.DoubleSide});
+  var ceilMat =new THREE.MeshStandardMaterial({map:ceilTex,  roughness:0.9, metalness:0,side:THREE.DoubleSide});
+  function scaleUV(g,su,sv){var uv=g.attributes.uv,i;for(i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*su,uv.getY(i)*sv);uv.needsUpdate=true;return g;}
+  var WT=2.4,FT=2.2,CT=1.6; // metres per texture tile (baked into geometry UVs so one material tiles correctly)
+  (function loadPBR(){var TL=new THREE.TextureLoader();
+    function rep(t){t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(1,1);t.anisotropy=MAXA;return t;}
+    function set(mat,base,tint){
+      TL.load('assets/'+base+'_diff.jpg',function(t){rep(t);t.encoding=THREE.sRGBEncoding;mat.map=t;if(tint!=null)mat.color.setHex(tint);mat.needsUpdate=true;},undefined,function(){/* keep procedural */});
+      if(!isMobile){
+        TL.load('assets/'+base+'_nor.jpg',function(t){rep(t);mat.normalMap=t;mat.needsUpdate=true;},undefined,function(){});
+        TL.load('assets/'+base+'_rough.jpg',function(t){rep(t);mat.roughnessMap=t;mat.needsUpdate=true;},undefined,function(){});
+      }
+    }
+    set(wallMat,'wall',0xd8cf82);set(floorMat,'floor',0x9a8a4a);set(ceilMat,'ceil',0xcfc8b0);
+  })();
 
   var world=new THREE.Group();scene.add(world);
   function planeMesh(w,h,mat){return new THREE.Mesh(new THREE.PlaneGeometry(w,h),mat);}
 
-  // ---------- corridor (tex/tint optional -> per-room look) ----------
-  function floorTile(cx,cz,sx,sz,tex,tint){var f=planeMesh(sx,sz,surfMat(texClone(tex||carpetTex,sx/2.4,sz/2.4),tint));f.rotation.x=-Math.PI/2;f.position.set(cx,0,cz);world.add(f);}
-  function ceilTile(cx,cz,sx,sz,tint){var f=planeMesh(sx,sz,surfMat(texClone(ceilTex,sx/1.3,sz/1.3),tint));f.rotation.x=Math.PI/2;f.position.set(cx,WALL_H,cz);world.add(f);}
-  function wallX(x0,x1,zpos,tex,tint){var len=Math.abs(x1-x0),cx=(x0+x1)/2,off=zpos>0?-0.03:0.03;
-    var w=planeMesh(len,WALL_H,surfMat(texClone(tex||wallTex,len/2.4,WALL_H/2.4),tint));w.position.set(cx,WALL_H/2,zpos);world.add(w);
-    var rl=new THREE.Mesh(new THREE.BoxGeometry(len,0.07,0.07),railMat);rl.position.set(cx,1.05,zpos+off);world.add(rl); // chair rail
+  // ---------- corridor (shared PBR materials, world-scale UVs baked into geometry) ----------
+  function floorTile(cx,cz,sx,sz){var f=new THREE.Mesh(scaleUV(new THREE.PlaneGeometry(sx,sz),sx/FT,sz/FT),floorMat);f.rotation.x=-Math.PI/2;f.position.set(cx,0,cz);world.add(f);}
+  function ceilTile(cx,cz,sx,sz){var f=new THREE.Mesh(scaleUV(new THREE.PlaneGeometry(sx,sz),sx/CT,sz/CT),ceilMat);f.rotation.x=Math.PI/2;f.position.set(cx,WALL_H,cz);world.add(f);}
+  function wallX(x0,x1,zpos){var len=Math.abs(x1-x0),cx=(x0+x1)/2,off=zpos>0?-0.03:0.03;
+    var w=new THREE.Mesh(scaleUV(new THREE.PlaneGeometry(len,WALL_H),len/WT,WALL_H/WT),wallMat);w.position.set(cx,WALL_H/2,zpos);world.add(w);
+    var rl=new THREE.Mesh(new THREE.BoxGeometry(len,0.07,0.07),railMat);rl.position.set(cx,1.05,zpos+off);world.add(rl);
     if(!isMobile){var sk=new THREE.Mesh(new THREE.BoxGeometry(len,0.22,0.06),skirtMat);sk.position.set(cx,0.11,zpos+off);world.add(sk);}}
-  function wallZ(z0,z1,xpos,tex,tint){var len=Math.abs(z1-z0),cz=(z0+z1)/2;
-    var w=planeMesh(len,WALL_H,surfMat(texClone(tex||wallTex,len/2.4,WALL_H/2.4),tint));w.rotation.y=Math.PI/2;w.position.set(xpos,WALL_H/2,cz);world.add(w);
-    var rl=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.07,len),railMat);rl.position.set(xpos,1.05,cz);world.add(rl); // chair rail
+  function wallZ(z0,z1,xpos){var len=Math.abs(z1-z0),cz=(z0+z1)/2;
+    var w=new THREE.Mesh(scaleUV(new THREE.PlaneGeometry(len,WALL_H),len/WT,WALL_H/WT),wallMat);w.rotation.y=Math.PI/2;w.position.set(xpos,WALL_H/2,cz);world.add(w);
+    var rl=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.07,len),railMat);rl.position.set(xpos,1.05,cz);world.add(rl);
     if(!isMobile){var sk=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.22,len),skirtMat);sk.position.set(xpos,0.11,cz);world.add(sk);}}
-  function junctionWall(wx,wz,face,tex,tint){
-    if(face==='N')wallX(wx-HW,wx+HW,wz+HW,tex,tint);else if(face==='S')wallX(wx-HW,wx+HW,wz-HW,tex,tint);
-    else if(face==='E')wallZ(wz-HW,wz+HW,wx+HW,tex,tint);else if(face==='W')wallZ(wz-HW,wz+HW,wx-HW,tex,tint);}
+  function junctionWall(wx,wz,face){
+    if(face==='N')wallX(wx-HW,wx+HW,wz+HW);else if(face==='S')wallX(wx-HW,wx+HW,wz-HW);
+    else if(face==='E')wallZ(wz-HW,wz+HW,wx+HW);else if(face==='W')wallZ(wz-HW,wz+HW,wx-HW);}
   function dirFace(a,b){if(b.z<a.z)return 'S';if(b.z>a.z)return 'N';if(b.x>a.x)return 'E';return 'W';}
 
   var openF=WP.map(function(){return {};});
