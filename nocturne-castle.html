@@ -138,13 +138,9 @@
     <div class="btn" id="toTop" title="Наверх">↑</div>
   </div>
 
-  <div id="hint"><span class="wheel"></span> прокрутите вниз</div>
-
   <div id="intro">
-    <div class="crest">— парикмахерская · тату-салон —</div>
-    <div class="title">Nocturne Castle<small>салон на дне лифтовой шахты</small></div>
+    <div class="title">Nocturne Castle</div>
     <button class="enter" id="enter">спуститься ниже</button>
-    <div class="subhint">прокрутка · тачпад · свайп</div>
   </div>
 
   <div id="services">
@@ -613,22 +609,30 @@
 
   // ---------- scroll ----------
   var targetP=0,curP=0,entered=false, st={};
-  var introEl=document.getElementById('intro'),hintEl=document.getElementById('hint'),
+  var introEl=document.getElementById('intro'),
       progEl=document.querySelector('#progress i'),servicesEl=document.getElementById('services'),
       capEl=document.getElementById('caption'),toTopEl=document.getElementById('toTop');
-  if(isMobile){hintEl.innerHTML='смахните вверх, чтобы лететь';}
 
-  function addScroll(d){if(!entered)return;targetP=Math.max(0,Math.min(1,targetP+d));hintEl.classList.add('hide');}
-  window.addEventListener('wheel',function(e){addScroll(e.deltaY*0.00062);},{passive:true});
-  var ty=null;
+  // any scroll/swipe/key also starts the descent (the button is just one way in)
+  function addScroll(d){ if(!entered) enter(); targetP=Math.max(0,Math.min(1,targetP+d)); }
   function onMenu(e){return e.target&&e.target.closest&&e.target.closest('.menu');}
-  window.addEventListener('touchstart',function(e){if(onMenu(e)){ty=null;return;}ty=e.touches[0].clientY;},{passive:true});
-  window.addEventListener('touchmove',function(e){if(onMenu(e))return;if(ty!=null){var dy=ty-e.touches[0].clientY;ty=e.touches[0].clientY;addScroll(dy*0.0020);}},{passive:true});
+
+  window.addEventListener('wheel',function(e){ addScroll(e.deltaY*0.00062); },{passive:true});
+
+  var ty=null;
+  window.addEventListener('touchstart',function(e){ if(onMenu(e)){ty=null;return;} ty=e.touches[0].clientY; },{passive:false});
+  window.addEventListener('touchmove',function(e){
+    if(onMenu(e))return;
+    if(ty!=null){ var y=e.touches[0].clientY, dy=ty-y; ty=y; if(e.cancelable)e.preventDefault(); addScroll(dy*0.0024); }
+  },{passive:false});
+  window.addEventListener('touchend',function(){ ty=null; },{passive:true});
+
   window.addEventListener('keydown',function(e){
     if(e.key==='ArrowDown'||e.key==='PageDown'||e.key===' ')addScroll(0.03);
     if(e.key==='ArrowUp'||e.key==='PageUp')addScroll(-0.03);
     if(e.key==='Home')targetP=0; if(e.key==='End')targetP=1;});
-  function enter(){entered=true;introEl.classList.add('hide');targetP=0.02;}
+
+  function enter(){ if(entered)return; entered=true; introEl.classList.add('hide'); if(targetP<0.02)targetP=0.02; }
   document.getElementById('enter').addEventListener('click',enter);
   introEl.addEventListener('click',function(e){if(e.target===introEl)enter();});
   toTopEl.addEventListener('click',function(){targetP=0;});
